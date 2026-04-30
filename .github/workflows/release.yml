@@ -135,7 +135,7 @@ jobs:
             runner: macos-latest
             goos: darwin
             goarch: arm64
-            output: monitoring24-darwin-arm64
+            output: monitoring24-macos-apple-silicon
 
     steps:
       - name: Checkout
