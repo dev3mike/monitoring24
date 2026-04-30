@@ -1,17 +1,112 @@
 name: Build and Release
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     branches:
       - main
+      - master
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        default: prerelease
+        options:
+          - prerelease
+          - stable
+      version:
+        description: "Optional version/tag (example: v1.2.3)"
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      make_latest: ${{ steps.meta.outputs.make_latest }}
+      allow_updates: ${{ steps.meta.outputs.allow_updates }}
+      replaces_artifacts: ${{ steps.meta.outputs.replaces_artifacts }}
+      remove_artifacts: ${{ steps.meta.outputs.remove_artifacts }}
+    steps:
+      - name: Compute metadata
+        id: meta
+        shell: bash
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          EVENT_NAME="${{ github.event_name }}"
+          REF_TYPE="${{ github.ref_type }}"
+          REF_NAME="${{ github.ref_name }}"
+          INPUT_CHANNEL="${{ github.event.inputs.channel || '' }}"
+          INPUT_VERSION="${{ github.event.inputs.version || '' }}"
+
+          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" == v* ]]; then
+            VERSION="$REF_NAME"
+            TAG="$REF_NAME"
+            RELEASE_NAME="$REF_NAME"
+            PRERELEASE="false"
+            MAKE_LATEST="true"
+            ALLOW_UPDATES="false"
+            REPLACES_ARTIFACTS="false"
+            REMOVE_ARTIFACTS="false"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$INPUT_CHANNEL" == "stable" ]]; then
+            if [[ -z "$INPUT_VERSION" ]]; then
+              echo "Stable manual releases require a version (for example v1.2.3)."
+              exit 1
+            fi
+            VERSION="$INPUT_VERSION"
+            TAG="$INPUT_VERSION"
+            RELEASE_NAME="$INPUT_VERSION"
+            PRERELEASE="false"
+            MAKE_LATEST="true"
+            ALLOW_UPDATES="false"
+            REPLACES_ARTIFACTS="false"
+            REMOVE_ARTIFACTS="false"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$INPUT_VERSION" ]]; then
+            VERSION="$INPUT_VERSION"
+            TAG="$INPUT_VERSION"
+            RELEASE_NAME="$INPUT_VERSION"
+            PRERELEASE="true"
+            MAKE_LATEST="false"
+            ALLOW_UPDATES="true"
+            REPLACES_ARTIFACTS="true"
+            REMOVE_ARTIFACTS="true"
+          else
+            VERSION="dev-$SHORT_SHA"
+            TAG="master-build"
+            RELEASE_NAME="master-build"
+            PRERELEASE="true"
+            MAKE_LATEST="false"
+            ALLOW_UPDATES="true"
+            REPLACES_ARTIFACTS="true"
+            REMOVE_ARTIFACTS="true"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "make_latest=$MAKE_LATEST" >> "$GITHUB_OUTPUT"
+          echo "allow_updates=$ALLOW_UPDATES" >> "$GITHUB_OUTPUT"
+          echo "replaces_artifacts=$REPLACES_ARTIFACTS" >> "$GITHUB_OUTPUT"
+          echo "remove_artifacts=$REMOVE_ARTIFACTS" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.name }})
+    needs: metadata
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -55,9 +150,8 @@ jobs:
       - name: Build binary
         shell: bash
         run: |
-          VERSION="${GITHUB_SHA::7}"
           CGO_ENABLED=0 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
-          go build -ldflags "-s -w -X main.version=${VERSION}" \
+          go build -ldflags "-s -w -X main.version=${{ needs.metadata.outputs.version }}" \
           -o "${{ matrix.output }}" ./cmd/server
 
       - name: Upload artifact
@@ -70,21 +164,24 @@ jobs:
   release:
     name: Publish release
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - metadata
+      - build
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
+          merge-multiple: true
 
       - name: Publish/Update release
         uses: ncipollo/release-action@v1
         with:
-          tag: master-build
-          name: master-build
-          allowUpdates: true
-          replacesArtifacts: true
-          removeArtifacts: true
-          prerelease: true
-          makeLatest: false
-          artifacts: "dist/**/*"
+          tag: ${{ needs.metadata.outputs.tag }}
+          name: ${{ needs.metadata.outputs.release_name }}
+          allowUpdates: ${{ needs.metadata.outputs.allow_updates }}
+          replacesArtifacts: ${{ needs.metadata.outputs.replaces_artifacts }}
+          removeArtifacts: ${{ needs.metadata.outputs.remove_artifacts }}
+          prerelease: ${{ needs.metadata.outputs.prerelease }}
+          makeLatest: ${{ needs.metadata.outputs.make_latest }}
+          artifacts: "dist/*"
