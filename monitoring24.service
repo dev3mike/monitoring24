@@ -1,0 +1,34 @@
+[Unit]
+Description=monitoring24 — Real-time server monitoring dashboard
+Documentation=https://github.com/masoudx/monitoring24
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=monitoring24
+Group=monitoring24
+# adm group allows reading /var/log/auth.log on Debian/Ubuntu
+SupplementaryGroups=adm
+
+ExecStart=/usr/local/bin/monitoring24 \
+    --port 47291 \
+    --host 127.0.0.1 \
+    --data-dir /var/lib/monitoring24
+
+WorkingDirectory=/var/lib/monitoring24
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=monitoring24
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/monitoring24
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
