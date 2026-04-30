@@ -1,5 +1,3 @@
-# monitoring24
-
 ![monitoring24 demo](demo.gif)
 
 > **Real-time server monitoring dashboard — single binary, zero config, instant insights.**
@@ -277,4 +275,3 @@ MIT — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">Built with Go · SQLite · Server-Sent Events · Tailwind CSS</p>
-# monitoring24
