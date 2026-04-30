@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>monitoring24</title>
+  <script>
+    (function () {
+      const s = localStorage.getItem('theme');
+      const d = s ? s === 'dark' : true;
+      document.documentElement.classList.toggle('dark', d);
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+  <div id="toast-container"></div>
+
+  <div class="tv-shell">
+    <header class="top-strip">
+      <div class="brand-lockup">
+        <div class="brand-mark">24</div>
+        <div>
+          <h1>monitoring24</h1>
+          <p>real-time server operations</p>
+        </div>
+      </div>
+      <div class="top-signals">
+        <div class="signal-pill">
+          <span id="sse-dot" class="status-dot"></span>
+          <span id="sse-text">Connecting...</span>
+        </div>
+        <div class="signal-pill">
+          <span>Updated</span>
+          <strong id="last-update">--</strong>
+        </div>
+        <div class="signal-pill">
+          <span>Uptime</span>
+          <strong id="status-uptime">--</strong>
+        </div>
+        <div class="signal-pill alert-signal">
+          <span>Alerts</span>
+          <strong id="top-alert-count">0</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section id="section-dashboard" class="section tv-section">
+
+
+        <div class="hero-grid">
+          <article class="metric-tile metric-cpu">
+            <div class="tile-label">CPU</div>
+            <div id="summary-cpu" class="tile-value">--</div>
+            <div id="cpu-sparkline" class="chart-box mini-chart"></div>
+          </article>
+          <article class="metric-tile metric-ram">
+            <div class="tile-label">RAM</div>
+            <div id="summary-ram" class="tile-value">--</div>
+            <div id="ram-sparkline" class="chart-box mini-chart"></div>
+          </article>
+          <article class="metric-tile metric-disk">
+            <div class="tile-label">Disk</div>
+            <div id="summary-disk" class="tile-value">--</div>
+            <div class="tile-caption">highest mounted volume</div>
+          </article>
+          <article id="dashboard-tunnel-card" class="metric-tile metric-tunnel">
+            <div class="tile-label">CF Tunnel</div>
+            <div id="summary-tunnel" class="tile-status">Unknown</div>
+            <div class="tile-caption">cloudflared status</div>
+          </article>
+          <article class="metric-tile metric-alerts">
+            <div class="tile-label">Alerts</div>
+            <div id="summary-alerts" class="tile-status">All clear</div>
+            <div class="tile-caption">active threshold breaches</div>
+          </article>
+
+          <article class="metric-tile metric-network network-panel">
+            <div class="tile-label">Network Traffic</div>
+            <div id="network-panel-rate" class="tile-value">--</div>
+            <div id="net-sparkline" class="chart-box mini-chart"></div>
+          </article>
+        </div>
+
+        <div id="dashboard-url-panel" class="dashboard-url-panel hidden">
+          <div id="dashboard-url-list" class="dashboard-url-list"></div>
+        </div>
+      </section>
+
+      <section id="section-system" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>System Health</h2>
+            <p>Hardware, OS metrics, storage, and I/O</p>
+          </div>
+        </div>
+
+        <div class="system-grid">
+          <article class="panel focus-panel">
+            <div class="panel-head">
+              <h3>CPU Usage</h3>
+              <div id="cpu-text" class="focus-value"><span id="cpu-pct">--</span></div>
+            </div>
+            <div class="meter">
+              <div id="cpu-bar" style="width:0%"></div>
+            </div>
+            <h4>Per Core</h4>
+            <div id="cpu-cores" class="core-grid"></div>
+          </article>
+
+          <article class="panel focus-panel">
+            <div class="panel-head">
+              <h3>Memory</h3>
+            </div>
+            <div class="metric-stack">
+              <div>
+                <div class="row-label"><span>RAM</span><strong><span id="ram-pct">--</span> <small
+                      id="ram-used"></small></strong></div>
+                <div class="meter">
+                  <div id="ram-bar" style="width:0%"></div>
+                </div>
+              </div>
+              <div>
+                <div class="row-label"><span>Swap</span><strong><span id="swap-pct">--</span> <small
+                      id="swap-used"></small></strong></div>
+                <div class="meter">
+                  <div id="swap-bar" style="width:0%"></div>
+                </div>
+              </div>
+            </div>
+            <div class="process-grid small">
+              <div><span>GC Cycles</span><strong id="app-gc">--</strong></div>
+              <div><span>Open Files</span><strong id="app-files">--</strong></div>
+              <div><span>Monitor Uptime</span><strong id="app-uptime">--</strong></div>
+            </div>
+          </article>
+        </div>
+
+        <div class="system-grid lower">
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Disk Usage</h3>
+            </div>
+            <div id="disk-list" class="compact-scroll tall-scroll"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Disk I/O</h3>
+            </div>
+            <div id="disk-io-list" class="compact-scroll tall-scroll"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Network I/O</h3>
+            </div>
+            <div id="network-io-list-2" class="compact-scroll tall-scroll"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="section-tunnel" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>Cloudflare Tunnel</h2>
+            <p>cloudflared process status and events</p>
+          </div>
+        </div>
+
+        <div class="two-column">
+          <article class="panel status-panel">
+            <div class="tile-label">Connection</div>
+            <div id="tunnel-badge" class="big-status">Unknown</div>
+            <div class="status-list">
+              <div><span>Tunnel Name</span><strong id="tunnel-name">--</strong></div>
+              <div><span>PID</span><strong id="tunnel-pid">--</strong></div>
+              <div><span>Uptime</span><strong id="tunnel-uptime">--</strong></div>
+              <div><span>Version</span><strong id="tunnel-version">--</strong></div>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Recent Events</h3>
+            </div>
+            <div id="tunnel-events" class="compact-scroll tall-scroll"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="section-services" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>Services</h2>
+            <p>systemd service health · refreshes every 30s</p>
+          </div>
+        </div>
+        <article class="panel table-panel">
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Service</th>
+                  <th>Status</th>
+                  <th>Restarts</th>
+                  <th>Since</th>
+                </tr>
+              </thead>
+              <tbody id="services-list">
+                <tr>
+                  <td colspan="4">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section id="section-security" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>Security</h2>
+            <p>SSH events from auth.log · pending updates</p>
+          </div>
+        </div>
+        <div class="hero-grid security-stats">
+          <article class="metric-tile">
+            <div class="tile-label">Pending Updates</div>
+            <div id="pending-updates" class="tile-value">--</div>
+          </article>
+          <article class="metric-tile">
+            <div class="tile-label">Security Updates</div>
+            <div id="pending-security-updates" class="tile-value warn">--</div>
+          </article>
+          <article class="metric-tile">
+            <div class="tile-label">Auth Log</div>
+            <div id="ssh-log-status" class="tile-status">--</div>
+          </article>
+        </div>
+        <div class="two-column">
+          <article class="panel table-panel">
+            <div class="panel-head">
+              <h3>Failed Login Attempts</h3>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Source IP</th>
+                    <th>User</th>
+                    <th>Type</th>
+                  </tr>
+                </thead>
+                <tbody id="ssh-failed-list">
+                  <tr>
+                    <td colspan="4">Loading...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Top Failed IPs (24h)</h3>
+            </div>
+            <div id="top-failed-ips" class="compact-scroll tall-scroll"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="section-urls" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>URL Health Checks</h2>
+            <p>External URLs and service latency</p>
+          </div>
+          <button id="open-add-url-dialog" class="small-action" type="button">+ Add URL</button>
+        </div>
+        <div id="url-list" class="url-grid"></div>
+      </section>
+
+      <section id="section-alerts" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>Alerts</h2>
+            <p>Active threshold breaches</p>
+          </div>
+          <button id="ack-all-alerts" class="danger-action hidden" type="button">Acknowledge all</button>
+        </div>
+        <div id="alerts-list" class="alerts-board"></div>
+      </section>
+
+      <section id="section-settings" class="section tv-section hidden">
+        <div class="section-heading">
+          <div>
+            <h2>Settings</h2>
+            <p>Alert thresholds and display preferences</p>
+          </div>
+        </div>
+        <article class="panel form-panel settings-panel">
+          <h3>Alert Thresholds</h3>
+          <form id="threshold-form" class="settings-form">
+            <label>CPU % threshold <input id="threshold-cpu-pct" name="cpu_pct" type="number" min="1" max="100" step="1"
+                value="90" /></label>
+            <label>RAM % threshold <input id="threshold-ram-pct" name="ram_pct" type="number" min="1" max="100" step="1"
+                value="85" /></label>
+            <label>Disk % threshold <input id="threshold-disk-pct" name="disk_pct" type="number" min="1" max="100"
+                step="1" value="90" /></label>
+            <label>Swap % threshold <input id="threshold-swap-pct" name="swap_pct" type="number" min="1" max="100"
+                step="1" value="80" /></label>
+            <label>URL slow response (ms) <input id="threshold-url-latency-ms" name="url_latency_ms" type="number"
+                min="100" max="60000" step="100" value="5000" /></label>
+            <button type="submit">Save Thresholds</button>
+          </form>
+        </article>
+      </section>
+    </main>
+
+    <nav class="bottom-tabs" aria-label="Primary">
+      <a href="#dashboard" data-section="dashboard" class="nav-link"><span>⌂</span><strong>Dashboard</strong></a>
+      <a href="#system" data-section="system" class="nav-link"><span>▥</span><strong>System</strong></a>
+      <a href="#tunnel" data-section="tunnel" class="nav-link"><span>◎</span><strong>Tunnel</strong></a>
+      <a href="#services" data-section="services" class="nav-link"><span>◫</span><strong>Services</strong></a>
+      <a href="#security" data-section="security" class="nav-link"><span>◈</span><strong>Security</strong></a>
+      <a href="#urls" data-section="urls" class="nav-link"><span>↗</span><strong>URL</strong></a>
+      <a href="#alerts" data-section="alerts" class="nav-link"><span>!</span><strong>Alerts</strong><em id="alert-badge"
+          class="hidden">0</em></a>
+      <a href="#settings" data-section="settings" class="nav-link"><span>⚙</span><strong>Settings</strong></a>
+    </nav>
+  </div>
+
+  <div id="add-url-dialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true"
+    aria-labelledby="add-url-title">
+    <article class="panel form-panel dialog-panel">
+      <div class="dialog-head">
+        <h3 id="add-url-title">Add New Monitor</h3>
+        <button id="close-add-url-dialog" class="dialog-close" type="button" aria-label="Close">×</button>
+      </div>
+      <form id="add-url-form" class="tv-form">
+        <label>URL <input name="url" type="url" placeholder="https://example.com" required /></label>
+        <label>Label <input name="label" type="text" placeholder="My Site" /></label>
+        <label>Interval <select name="interval">
+            <option value="5">5s</option>
+            <option value="10">10s</option>
+            <option value="15">15s</option>
+            <option value="30">30s</option>
+            <option value="60" selected>1 min</option>
+            <option value="120">2 min</option>
+            <option value="300">5 min</option>
+          </select></label>
+        <label>Timeout <select name="timeout">
+            <option value="5">5s</option>
+            <option value="10" selected>10s</option>
+            <option value="15">15s</option>
+            <option value="30">30s</option>
+          </select></label>
+        <button type="submit">Add Monitor</button>
+      </form>
+    </article>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>
