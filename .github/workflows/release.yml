@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - main
-      - master
     tags:
       - "v*"
   workflow_dispatch:
@@ -86,8 +85,8 @@ jobs:
             REMOVE_ARTIFACTS="true"
           else
             VERSION="dev-$SHORT_SHA"
-            TAG="master-build"
-            RELEASE_NAME="master-build"
+            TAG="main-build"
+            RELEASE_NAME="main-build"
             PRERELEASE="true"
             MAKE_LATEST="false"
             ALLOW_UPDATES="true"
@@ -140,10 +139,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -155,7 +154,7 @@ jobs:
           -o "${{ matrix.output }}" ./cmd/server
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.output }}
           path: ${{ matrix.output }}
@@ -169,7 +168,7 @@ jobs:
       - build
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
