@@ -397,9 +397,15 @@ function renderDisks(disks) {
         <span>${fmtBytes(d.total)} total · ${d.fs_type}</span>
       </div>
     </div>`).join('') || '<p class="text-sm dark:text-slate-400 text-slate-500">No disk data</p>';
-  setText('summary-disk', fmtPct(Math.max(0, ...(disks.map(d => d.percent)))));
   const totalUsed = disks.reduce((sum, d) => sum + (d.used || 0), 0);
   const totalSize = disks.reduce((sum, d) => sum + (d.total || 0), 0);
+  let aggPct = null;
+  if (totalSize > 0) {
+    aggPct = (100 * totalUsed) / totalSize;
+    if (aggPct < 0) aggPct = 0;
+    if (aggPct > 100) aggPct = 100;
+  }
+  setText('summary-disk', fmtPct(aggPct));
   setText('disk-actual', totalSize > 0 ? `${fmtBytes(totalUsed)} / ${fmtBytes(totalSize)}` : '— / —');
 }
 
