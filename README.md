@@ -103,6 +103,8 @@ make cross-all
 make test
 ```
 
+Tests live in the `tests/` module package (`go test ./tests/...` or `go test ./...`). They cover SQLite persistence, the alert engine, URL checks against local HTTP servers, API routes (including basic auth), SSE delivery, SSH auth-line parsing, and tunnel name extraction from argv. Collectors that depend on the host OS (`gopsutil`, `systemctl`, live auth logs, process scanning) are exercised by running the binary on a real machine rather than in CI-style unit tests.
+
 ### Cross-compilation matrix
 
 | Target | Command | Output |
