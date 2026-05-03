@@ -20,8 +20,23 @@ const state = {
   dashboardURLIDs: new Set(),
 };
 
-const MAX_HISTORY = 60; // data points for sparklines
+const MAX_HISTORY = 30;
 let sparklineSeq = 0;
+
+const CARD_MAP = {
+  cpu:    'card-cpu',
+  ram:    'card-ram',
+  disk:   'card-disk',
+  tunnel: 'dashboard-tunnel-card',
+  alerts: 'card-alerts',
+  network: 'card-network',
+  urls:   'dashboard-url-panel',
+};
+
+const CARD_LABELS = {
+  cpu: 'CPU', ram: 'RAM', disk: 'Disk',
+  tunnel: 'CF Tunnel', alerts: 'Alerts', network: 'Network', urls: 'URL Checks',
+};
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 function el(id) { return document.getElementById(id); }
@@ -148,7 +163,91 @@ function loadDisplayPrefs() {
   } catch {
     state.dashboardURLIDs = new Set();
   }
+  applyCardVisibility();
+}
 
+// ── Card visibility ────────────────────────────────────────────────────────
+function loadDashboardHidden() {
+  try {
+    return JSON.parse(localStorage.getItem('dashboardHidden') || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveDashboardHidden(hidden) {
+  localStorage.setItem('dashboardHidden', JSON.stringify(hidden));
+}
+
+function applyCardVisibility() {
+  const hidden = loadDashboardHidden();
+  Object.entries(CARD_MAP).forEach(([key, elemId]) => {
+    const e = el(elemId);
+    if (!e) return;
+    const isHidden = !!hidden[key];
+    e.dataset.userHidden = isHidden ? 'true' : '';
+    if (isHidden) {
+      e.classList.add('hidden');
+    } else if (key !== 'tunnel' && key !== 'urls') {
+      e.classList.remove('hidden');
+    }
+  });
+}
+
+function renderCardToggles() {
+  const container = el('card-toggle-grid');
+  if (!container) return;
+  const hidden = loadDashboardHidden();
+  container.innerHTML = Object.keys(CARD_MAP).map(key => {
+    const checked = !hidden[key];
+    return `<label class="card-toggle-row">
+      <span>${CARD_LABELS[key]}</span>
+      <span class="toggle-switch">
+        <input type="checkbox" class="card-toggle-cb sr-only" data-card="${key}" ${checked ? 'checked' : ''} />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </span>
+    </label>`;
+  }).join('');
+  container.querySelectorAll('.card-toggle-cb').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const h = loadDashboardHidden();
+      if (!cb.checked) {
+        h[cb.dataset.card] = true;
+      } else {
+        delete h[cb.dataset.card];
+      }
+      saveDashboardHidden(h);
+      applyCardVisibility();
+    });
+  });
+}
+
+// ── Fullscreen ─────────────────────────────────────────────────────────────
+function initFullscreen() {
+  const btn = el('fullscreen-btn');
+  if (!btn) return;
+  if (!document.documentElement.requestFullscreen) {
+    btn.classList.add('hidden');
+    return;
+  }
+  function syncIcon() {
+    const isFs = !!document.fullscreenElement;
+    const expand = el('fs-icon-expand');
+    const compress = el('fs-icon-compress');
+    if (expand) expand.classList.toggle('hidden', isFs);
+    if (compress) compress.classList.toggle('hidden', !isFs);
+  }
+  btn.addEventListener('click', () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        showToast('Fullscreen unavailable: ' + err.message, 'warning');
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  });
+  document.addEventListener('fullscreenchange', syncIcon);
+  syncIcon();
 }
 
 function saveDashboardURLPrefs() {
@@ -248,6 +347,7 @@ function renderSystem() {
   // Summary cards
   setText('summary-cpu', fmtPct(cpu));
   setText('summary-ram', fmtPct(ram));
+  setText('ram-actual', `${fmtBytes(s.mem_used)} / ${fmtBytes(s.mem_total)}`);
 
   // Disks
   renderDisks(s.disks || []);
@@ -298,6 +398,9 @@ function renderDisks(disks) {
       </div>
     </div>`).join('') || '<p class="text-sm dark:text-slate-400 text-slate-500">No disk data</p>';
   setText('summary-disk', fmtPct(Math.max(0, ...(disks.map(d => d.percent)))));
+  const totalUsed = disks.reduce((sum, d) => sum + (d.used || 0), 0);
+  const totalSize = disks.reduce((sum, d) => sum + (d.total || 0), 0);
+  setText('disk-actual', totalSize > 0 ? `${fmtBytes(totalUsed)} / ${fmtBytes(totalSize)}` : '— / —');
 }
 
 function renderNetworkIO(ifaces) {
@@ -384,7 +487,7 @@ function renderTunnel() {
   const summaryBadge = el('summary-tunnel');
   const hasTunnel = !!(t && (t.running || t.tunnel_name || t.pid || t.version));
 
-  if (card) card.classList.toggle('hidden', !hasTunnel);
+  if (card && card.dataset.userHidden !== 'true') card.classList.toggle('hidden', !hasTunnel);
 
   if (!t) {
     if (badge) badge.textContent = 'Unknown';
@@ -628,7 +731,7 @@ function renderDashboardURLs() {
   if (!panel || !container) return;
 
   const pinned = state.urls.filter(u => isURLOnDashboard(urlCheckID(u)));
-  panel.classList.toggle('hidden', pinned.length === 0);
+  if (panel.dataset.userHidden !== 'true') panel.classList.toggle('hidden', pinned.length === 0);
 
   if (!pinned.length) {
     container.innerHTML = '';
@@ -942,6 +1045,7 @@ function showToast(msg, type = 'info') {
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   initNav();
+  initFullscreen();
 
   // Register form handlers
   const addForm = el('add-url-form');
@@ -967,6 +1071,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (ackAllBtn) ackAllBtn.addEventListener('click', acknowledgeAllAlerts);
 
   loadDisplayPrefs();
+  renderCardToggles();
 
   // Initial data load via REST
   try {
