@@ -71,7 +71,7 @@ func (d *Detector) Collect(ctx context.Context) (*Status, error) {
 		}
 
 		if cmdline, err := found.CmdlineSliceWithContext(ctx); err == nil {
-			s.TunnelName = extractTunnelName(cmdline)
+			s.TunnelName = TunnelNameFromArgs(cmdline)
 		}
 
 		s.Version = d.getVersion(ctx)
@@ -104,7 +104,9 @@ func (d *Detector) Collect(ctx context.Context) (*Status, error) {
 	return s, nil
 }
 
-func extractTunnelName(args []string) string {
+// TunnelNameFromArgs extracts a tunnel name from a cloudflared argv slice
+// (--name NAME or "run NAME").
+func TunnelNameFromArgs(args []string) string {
 	for i, arg := range args {
 		if arg == "--name" && i+1 < len(args) {
 			return args[i+1]

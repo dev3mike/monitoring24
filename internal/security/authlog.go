@@ -80,7 +80,7 @@ func (p *Parser) parse(ctx context.Context) error {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if event, ok := parseLine(line, year); ok {
+		if event, ok := ParseAuthLogLine(line, year); ok {
 			_ = p.db.InsertSSHEvent(event)
 		}
 	}
@@ -90,7 +90,9 @@ func (p *Parser) parse(ctx context.Context) error {
 	return scanner.Err()
 }
 
-func parseLine(line string, year int) (storage.SSHEvent, bool) {
+// ParseAuthLogLine parses one auth.log-style line into an SSH event when it matches
+// a known SSH pattern (failed login, accepted, or invalid user).
+func ParseAuthLogLine(line string, year int) (storage.SSHEvent, bool) {
 	if m := reFailed.FindStringSubmatch(line); m != nil {
 		ts := parseTimestamp(m[1], year)
 		user := m[2]
