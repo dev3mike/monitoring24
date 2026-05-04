@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -124,6 +125,119 @@ func TestHTTP_BasicAuthRejectsAndAccepts(t *testing.T) {
 	// then
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("expected 200 with valid auth, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestHTTP_MetricHistoryRequiresAuthWhenEnabled(t *testing.T) {
+	// given
+	_, h, _, _, _, cancel := newTestHandler(t)
+	defer cancel()
+	hash, err := bcrypt.GenerateFromPassword([]byte("x"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{BasicAuthUser: "u", BasicAuthHash: hash}
+	mux := http.NewServeMux()
+	httpserver.SetupRoutes(mux, h, sse.NewBroker(), cfg, testAssets())
+
+	// when
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/history?kind=cpu&from=1&to=2&step=60", nil)
+	mux.ServeHTTP(rec, req)
+
+	// then
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestHTTP_MetricHistoryGET(t *testing.T) {
+	// given
+	db, h, _, _, ctx, cancel := newTestHandler(t)
+	defer cancel()
+	now := time.Now()
+	base := now.Add(-40 * time.Minute).Truncate(time.Minute).Unix()
+	ramUsed := uint64(120_000_000_000)
+	ramTotal := uint64(320_000_000_000)
+	for i := int64(0); i < 3; i++ {
+		ts := base + i*60
+		if err := db.InsertMetricSnapshot(ctx, storage.MetricSnapshot{
+			TS: ts, CPUPct: float64(10 * (i + 1)), RAMPct: 40, SwapPct: 0,
+			RAMUsed: ramUsed, RAMTotal: ramTotal, Disks: nil, NetIfaces: nil,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := http.NewServeMux()
+	cfg := &config.Config{}
+	httpserver.SetupRoutes(mux, h, sse.NewBroker(), cfg, testAssets())
+	from, to := base, base+120
+
+	// when
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/metrics/history?kind=ram&from=%d&to=%d&step=60", from, to), nil)
+	req = req.WithContext(ctx)
+	mux.ServeHTTP(rec, req)
+
+	// then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Kind   string `json:"kind"`
+		Unit   string `json:"unit"`
+		Points []struct {
+			T     int64   `json:"t"`
+			V     float64 `json:"v"`
+			Used  *uint64 `json:"used"`
+			Total *uint64 `json:"total"`
+		} `json:"points"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Kind != "ram" || payload.Unit != "percent" {
+		t.Fatalf("unexpected meta %+v", payload)
+	}
+	if len(payload.Points) < 2 {
+		t.Fatalf("expected at least 2 points, got %+v", payload.Points)
+	}
+	for _, pt := range payload.Points {
+		if pt.Used == nil || pt.Total == nil {
+			t.Fatalf("expected used/total bytes on ram points, got %+v", pt)
+		}
+		if *pt.Used != ramUsed || *pt.Total != ramTotal {
+			t.Fatalf("unexpected ram bytes %+v want %d / %d", pt, ramUsed, ramTotal)
+		}
+	}
+}
+
+func TestHTTP_MetricHistoryBadRequest(t *testing.T) {
+	// given
+	_, h, _, _, _, cancel := newTestHandler(t)
+	defer cancel()
+	mux := http.NewServeMux()
+	cfg := &config.Config{}
+	httpserver.SetupRoutes(mux, h, sse.NewBroker(), cfg, testAssets())
+
+	// when
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/history?kind=wat&from=1&to=2&step=60", nil)
+	mux.ServeHTTP(rec, req)
+
+	// then
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// when
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/api/metrics/history?kind=cpu&from=1&to=2", nil)
+	mux.ServeHTTP(rec2, req2)
+
+	// then
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 without step, got %d", rec2.Code)
 	}
 }
 

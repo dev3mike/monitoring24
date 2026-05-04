@@ -24,6 +24,7 @@ func SetupRoutes(mux *http.ServeMux, h *Handler, broker *sse.Broker, cfg *config
 
 	// API routes
 	mux.HandleFunc("GET /api/metrics", wrap(h.HandleMetrics))
+	mux.HandleFunc("GET /api/metrics/history", wrap(h.HandleMetricHistory))
 	mux.HandleFunc("GET /api/alerts", wrap(h.HandleAlerts))
 	mux.HandleFunc("POST /api/alerts/{id}/acknowledge", wrap(h.HandleAcknowledgeAlert))
 	mux.HandleFunc("/api/url-checks", wrap(h.HandleURLChecks))

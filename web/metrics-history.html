@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en" class="dark metrics-history-root">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#07111f" />
+  <title>Metric history — monitoring24</title>
+  <link rel="icon" href="/static/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+  <link rel="manifest" href="/static/site.webmanifest" />
+  <script>
+    (function () {
+      const s = localStorage.getItem('theme');
+      const d = s ? s === 'dark' : true;
+      document.documentElement.classList.toggle('dark', d);
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { mono: ['JetBrains Mono', 'Fira Code', 'monospace'] }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .metrics-history-root body,
+    body.metrics-history-body {
+      overflow: auto;
+      height: auto;
+      min-height: 100vh;
+    }
+  </style>
+</head>
+<body class="metrics-history-body">
+  <div class="tv-shell max-w-6xl mx-auto">
+    <header class="top-strip flex-wrap gap-3 mb-6">
+      <div class="flex items-center gap-3 min-w-0">
+        <a href="/" class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-600/60 dark:border-slate-500/50 text-sm font-medium text-slate-200 hover:bg-slate-800/80 shrink-0">
+          ← Back
+        </a>
+        <h1 id="history-title" class="text-lg font-semibold text-slate-100 truncate">Metric history</h1>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 justify-end flex-1">
+        <label class="text-xs text-slate-400 sr-only" for="preset-range">Range</label>
+        <select id="preset-range" class="rounded-lg border border-slate-600/60 bg-slate-900/80 text-slate-100 text-sm px-2 py-2">
+          <option value="24h">Last 24 hours</option>
+          <option value="48h">Last 48 hours</option>
+          <option value="7d">Last week</option>
+          <option value="30d">Last month</option>
+          <option value="custom">Custom range…</option>
+        </select>
+        <label class="text-xs text-slate-400 sr-only" for="resolution">Resolution</label>
+        <select id="resolution" class="rounded-lg border border-slate-600/60 bg-slate-900/80 text-slate-100 text-sm px-2 py-2">
+          <option value="60">1 minute</option>
+          <option value="300">5 minutes</option>
+          <option value="600">10 minutes</option>
+          <option value="1800">30 minutes</option>
+          <option value="3600">1 hour</option>
+          <option value="86400">1 day</option>
+        </select>
+        <button type="button" id="btn-custom-range" class="hidden text-sm px-3 py-2 rounded-lg border border-slate-600/60 text-slate-200 hover:bg-slate-800/80">
+          Edit range
+        </button>
+      </div>
+    </header>
+
+    <dialog id="custom-range-dialog" class="rounded-xl border border-slate-600/60 bg-slate-900 text-slate-100 p-6 backdrop:bg-black/60 max-w-md w-[calc(100%-2rem)]">
+      <form id="custom-range-form" class="space-y-4">
+        <h2 class="text-base font-semibold">Custom range</h2>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1" for="custom-from">From</label>
+          <input id="custom-from" type="datetime-local" required class="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1" for="custom-to">To</label>
+          <input id="custom-to" type="datetime-local" required class="w-full rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm" />
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="custom-range-cancel" class="px-3 py-2 text-sm rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-800">Cancel</button>
+          <button type="submit" class="px-3 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-500">Apply</button>
+        </div>
+      </form>
+    </dialog>
+
+    <section id="chart-wrap" class="rounded-xl border border-slate-600/40 bg-slate-900/40 p-4 mb-6 min-h-[220px]">
+      <div id="chart-status" class="text-sm text-slate-400 py-8 text-center">Loading…</div>
+      <div id="chart-host" class="hidden w-full"></div>
+    </section>
+
+    <section>
+      <h2 class="text-sm font-medium text-slate-400 mb-2">Data points</h2>
+      <div class="rounded-xl border border-slate-600/40 overflow-hidden max-h-[min(50vh,420px)] overflow-y-auto">
+        <table class="w-full text-sm tabular-nums">
+          <thead class="sticky top-0 bg-slate-900/95 border-b border-slate-600/50">
+            <tr>
+              <th class="text-left font-medium text-slate-400 px-3 py-2">Time</th>
+              <th class="text-right font-medium text-slate-400 px-3 py-2">Usage</th>
+              <th id="points-cap-head" class="text-right font-medium text-slate-400 px-3 py-2 hidden">Used / total</th>
+            </tr>
+          </thead>
+          <tbody id="points-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="/static/metrics-history.js"></script>
+</body>
+</html>

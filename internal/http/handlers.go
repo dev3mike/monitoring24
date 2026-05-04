@@ -9,6 +9,7 @@ import (
 
 	"github.com/masoudx/monitoring24/internal/alerts"
 	"github.com/masoudx/monitoring24/internal/metrics"
+	"github.com/masoudx/monitoring24/internal/metricshistory"
 	"github.com/masoudx/monitoring24/internal/security"
 	"github.com/masoudx/monitoring24/internal/services"
 	"github.com/masoudx/monitoring24/internal/storage"
@@ -95,6 +96,48 @@ func (h *Handler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 		"app":     d.App,
 		"network": d.Network,
 	})
+}
+
+// ── GET /api/metrics/history ───────────────────────────────────────────────────
+
+func (h *Handler) HandleMetricHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	q := r.URL.Query()
+	kind := q.Get("kind")
+	fromStr, toStr, stepStr := q.Get("from"), q.Get("to"), q.Get("step")
+	if kind == "" || fromStr == "" || toStr == "" || stepStr == "" {
+		writeError(w, http.StatusBadRequest, "kind, from, to, and step are required (unix seconds)")
+		return
+	}
+	fromUnix, err := strconv.ParseInt(fromStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid from")
+		return
+	}
+	toUnix, err := strconv.ParseInt(toStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid to")
+		return
+	}
+	step, err := strconv.ParseInt(stepStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid step")
+		return
+	}
+	resolved, err := metricshistory.ResolveQuery(kind, fromUnix, toUnix, step, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := metricshistory.Fetch(r.Context(), h.db, resolved)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ── /api/alerts ──────────────────────────────────────────────────────────────

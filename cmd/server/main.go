@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,6 +33,15 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
 	cfg := config.ParseFlags()
+
+	addr := cfg.Addr()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			log.Fatalf("listen %s: port already in use — stop the other process or choose another --port", addr)
+		}
+		log.Fatalf("listen %s: %v", addr, err)
+	}
 
 	// ── Storage ──────────────────────────────────────────────────────────────
 	dbPath := cfg.DataDir + "/monitor.db"
@@ -75,7 +86,7 @@ func main() {
 	httpserver.SetupRoutes(mux, handler, broker, cfg, webpkg.FS)
 
 	srv := &http.Server{
-		Addr:         cfg.Addr(),
+		Addr:         addr,
 		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // SSE needs unlimited write timeout
@@ -88,7 +99,7 @@ func main() {
 
 	go func() {
 		fmt.Printf("\n  monitoring24 running at http://%s\n\n", displayAddr(cfg.Host, cfg.Port))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
 	}()

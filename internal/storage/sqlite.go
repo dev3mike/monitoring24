@@ -32,8 +32,39 @@ func Open(path string) (*DB, error) {
 }
 
 func (db *DB) migrate() error {
-	_, err := db.conn.Exec(schemaSQL)
-	return err
+	if _, err := db.conn.Exec(schemaSQL); err != nil {
+		return err
+	}
+	return db.migrateMetricSnapshotExtras()
+}
+
+// migrateMetricSnapshotExtras adds metric_snapshots columns introduced after older deployments.
+func (db *DB) migrateMetricSnapshotExtras() error {
+	cols := []struct {
+		name string
+		ddl  string
+	}{
+		{"disk_agg_pct", "REAL NOT NULL DEFAULT 0"},
+		{"disk_agg_used", "INTEGER NOT NULL DEFAULT 0"},
+		{"disk_agg_total", "INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, c := range cols {
+		var n int
+		if err := db.conn.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('metric_snapshots') WHERE name=?`,
+			c.name,
+		).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		stmt := fmt.Sprintf(`ALTER TABLE metric_snapshots ADD COLUMN %s %s`, c.name, c.ddl)
+		if _, err := db.conn.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (db *DB) Close() error {
@@ -362,12 +393,14 @@ func (db *DB) InsertMetricSnapshot(ctx context.Context, s MetricSnapshot) error 
 	if err != nil {
 		return fmt.Errorf("marshal net_json: %w", err)
 	}
+	diskAgg := CombinedDiskUsagePct(s.Disks)
+	diskUsed, diskTotal := CombinedDiskAggBytes(s.Disks)
 	_, err = db.conn.ExecContext(ctx,
 		`INSERT OR REPLACE INTO metric_snapshots
-		    (ts, cpu_pct, ram_pct, swap_pct, ram_used, ram_total, disk_json, net_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		    (ts, cpu_pct, ram_pct, swap_pct, ram_used, ram_total, disk_json, net_json, disk_agg_pct, disk_agg_used, disk_agg_total)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.TS, s.CPUPct, s.RAMPct, s.SwapPct, s.RAMUsed, s.RAMTotal,
-		string(diskJSON), string(netJSON),
+		string(diskJSON), string(netJSON), diskAgg, diskUsed, diskTotal,
 	)
 	return err
 }
@@ -375,7 +408,7 @@ func (db *DB) InsertMetricSnapshot(ctx context.Context, s MetricSnapshot) error 
 // QueryMetricHistory returns snapshots in the [from, to] range, oldest first.
 func (db *DB) QueryMetricHistory(ctx context.Context, from, to time.Time, limit int) ([]MetricSnapshot, error) {
 	rows, err := db.conn.QueryContext(ctx,
-		`SELECT ts, cpu_pct, ram_pct, swap_pct, ram_used, ram_total, disk_json, net_json
+		`SELECT ts, cpu_pct, ram_pct, swap_pct, ram_used, ram_total, disk_json, net_json, disk_agg_pct, disk_agg_used, disk_agg_total
 		 FROM metric_snapshots
 		 WHERE ts >= ? AND ts <= ?
 		 ORDER BY ts ASC
@@ -394,9 +427,20 @@ func scanMetricSnapshots(rows *sql.Rows) ([]MetricSnapshot, error) {
 	for rows.Next() {
 		var s MetricSnapshot
 		var diskJSON, netJSON string
+		var diskAgg sql.NullFloat64
+		var diskUsed, diskTot sql.NullInt64
 		if err := rows.Scan(&s.TS, &s.CPUPct, &s.RAMPct, &s.SwapPct,
-			&s.RAMUsed, &s.RAMTotal, &diskJSON, &netJSON); err != nil {
+			&s.RAMUsed, &s.RAMTotal, &diskJSON, &netJSON, &diskAgg, &diskUsed, &diskTot); err != nil {
 			return nil, err
+		}
+		if diskAgg.Valid {
+			s.DiskAggPct = diskAgg.Float64
+		}
+		if diskUsed.Valid {
+			s.DiskAggUsed = uint64(diskUsed.Int64)
+		}
+		if diskTot.Valid {
+			s.DiskAggTotal = uint64(diskTot.Int64)
 		}
 		if err := json.Unmarshal([]byte(diskJSON), &s.Disks); err != nil {
 			return nil, fmt.Errorf("unmarshal disk_json: %w", err)
@@ -405,6 +449,56 @@ func scanMetricSnapshots(rows *sql.Rows) ([]MetricSnapshot, error) {
 			return nil, fmt.Errorf("unmarshal net_json: %w", err)
 		}
 		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// QueryMetricHistoryAggregated returns AVG(value) per time bucket of step seconds.
+// For ram/disk, AuxUsedAvg and AuxTotalAvg hold AVG(bytes) within each bucket (used/total capacity).
+// kind must be cpu, ram, or disk (whitelisted). fromUnix and toUnix are inclusive Unix seconds.
+func (db *DB) QueryMetricHistoryAggregated(ctx context.Context, kind string, fromUnix, toUnix int64, step int64) ([]MetricHistoryBucket, error) {
+	if step <= 0 {
+		return nil, fmt.Errorf("step must be positive")
+	}
+	var q string
+	switch kind {
+	case "cpu":
+		q = `SELECT (ts / ?) * ? AS bucket_ts, AVG(cpu_pct) AS v,
+		            CAST(NULL AS REAL) AS aux_used, CAST(NULL AS REAL) AS aux_total
+		     FROM metric_snapshots
+		     WHERE ts >= ? AND ts <= ?
+		     GROUP BY bucket_ts
+		     ORDER BY bucket_ts ASC`
+	case "ram":
+		q = `SELECT (ts / ?) * ? AS bucket_ts, AVG(ram_pct) AS v,
+		            AVG(CAST(ram_used AS REAL)) AS aux_used, AVG(CAST(ram_total AS REAL)) AS aux_total
+		     FROM metric_snapshots
+		     WHERE ts >= ? AND ts <= ?
+		     GROUP BY bucket_ts
+		     ORDER BY bucket_ts ASC`
+	case "disk":
+		q = `SELECT (ts / ?) * ? AS bucket_ts, AVG(COALESCE(disk_agg_pct, 0)) AS v,
+		            AVG(COALESCE(CAST(disk_agg_used AS REAL), 0)) AS aux_used,
+		            AVG(COALESCE(CAST(disk_agg_total AS REAL), 0)) AS aux_total
+		     FROM metric_snapshots
+		     WHERE ts >= ? AND ts <= ?
+		     GROUP BY bucket_ts
+		     ORDER BY bucket_ts ASC`
+	default:
+		return nil, fmt.Errorf("unknown metric history kind %q", kind)
+	}
+	rows, err := db.conn.QueryContext(ctx, q, step, step, fromUnix, toUnix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MetricHistoryBucket
+	for rows.Next() {
+		var b MetricHistoryBucket
+		if err := rows.Scan(&b.BucketTS, &b.Value, &b.AuxUsedAvg, &b.AuxTotalAvg); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
 	}
 	return out, rows.Err()
 }

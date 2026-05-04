@@ -1,6 +1,9 @@
 package storage
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS alerts (
@@ -65,14 +68,17 @@ INSERT OR IGNORE INTO thresholds(key, value) VALUES
     ('url_latency_ms', 5000.0);
 
 CREATE TABLE IF NOT EXISTS metric_snapshots (
-    ts         INTEGER PRIMARY KEY,
-    cpu_pct    REAL    NOT NULL,
-    ram_pct    REAL    NOT NULL,
-    swap_pct   REAL    NOT NULL,
-    ram_used   INTEGER NOT NULL,
-    ram_total  INTEGER NOT NULL,
-    disk_json  TEXT    NOT NULL,
-    net_json   TEXT    NOT NULL
+    ts               INTEGER PRIMARY KEY,
+    cpu_pct          REAL    NOT NULL,
+    ram_pct          REAL    NOT NULL,
+    swap_pct         REAL    NOT NULL,
+    ram_used         INTEGER NOT NULL,
+    ram_total        INTEGER NOT NULL,
+    disk_json        TEXT    NOT NULL,
+    net_json         TEXT    NOT NULL,
+    disk_agg_pct     REAL    NOT NULL DEFAULT 0,
+    disk_agg_used    INTEGER NOT NULL DEFAULT 0,
+    disk_agg_total   INTEGER NOT NULL DEFAULT 0
 );
 `
 
@@ -136,14 +142,17 @@ type IPCount struct {
 
 // MetricSnapshot is one minute of aggregated system metrics stored in SQLite.
 type MetricSnapshot struct {
-	TS        int64
-	CPUPct    float64
-	RAMPct    float64
-	SwapPct   float64
-	RAMUsed   uint64
-	RAMTotal  uint64
-	Disks     []DiskSample
-	NetIfaces []NetSample
+	TS           int64
+	CPUPct       float64
+	RAMPct       float64
+	SwapPct      float64
+	RAMUsed      uint64
+	RAMTotal     uint64
+	Disks        []DiskSample
+	NetIfaces    []NetSample
+	DiskAggPct   float64 // persisted combined used/total % (see CombinedDiskUsagePct)
+	DiskAggUsed  uint64  // bytes; sum(used) across mounts at snapshot time
+	DiskAggTotal uint64  // bytes; sum(total) across mounts at snapshot time
 }
 
 // DiskSample is a per-mountpoint aggregated disk metric within a MetricSnapshot.
@@ -160,4 +169,13 @@ type NetSample struct {
 	Interface    string `json:"interface"`
 	BytesSentSec uint64 `json:"bytes_sent_sec"`
 	BytesRecvSec uint64 `json:"bytes_recv_sec"`
+}
+
+// MetricHistoryBucket is one SQL-aggregated time bucket (e.g. AVG(cpu_pct) per step).
+// AuxUsedAvg/AuxTotalAvg are averaged byte counters within the bucket when applicable (RAM/disk history).
+type MetricHistoryBucket struct {
+	BucketTS    int64
+	Value       float64
+	AuxUsedAvg  sql.NullFloat64
+	AuxTotalAvg sql.NullFloat64
 }

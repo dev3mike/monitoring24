@@ -223,6 +223,39 @@ function renderCardToggles() {
 }
 
 // ── Fullscreen ─────────────────────────────────────────────────────────────
+function openMetricHistory(kind) {
+  const now = Math.floor(Date.now() / 1000);
+  const from = now - 24 * 3600;
+  const step = 300;
+  window.location.href = `/metrics-history.html?kind=${encodeURIComponent(kind)}&from=${from}&to=${now}&step=${step}`;
+}
+
+function initMetricHistoryNav() {
+  const specs = [
+    { id: 'card-cpu', kind: 'cpu' },
+    { id: 'card-ram', kind: 'ram' },
+    { id: 'card-disk', kind: 'disk' },
+  ];
+  for (const { id, kind } of specs) {
+    const node = el(id);
+    if (!node) continue;
+    node.setAttribute('role', 'button');
+    node.setAttribute('tabindex', '0');
+    node.setAttribute('aria-label', `Open ${kind.toUpperCase()} metric history`);
+    node.classList.add('cursor-pointer');
+    node.addEventListener('click', (ev) => {
+      if (ev.target.closest('a, button, input, label')) return;
+      openMetricHistory(kind);
+    });
+    node.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        openMetricHistory(kind);
+      }
+    });
+  }
+}
+
 function initFullscreen() {
   const btn = el('fullscreen-btn');
   if (!btn) return;
@@ -1052,6 +1085,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   initNav();
   initFullscreen();
+  initMetricHistoryNav();
 
   // Register form handlers
   const addForm = el('add-url-form');
