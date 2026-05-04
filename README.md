@@ -11,6 +11,7 @@ A lightweight, production-ready monitoring web application built in Go. Drop it 
 | Category | What You Get |
 |---|---|
 | **System Health** | CPU (per-core + averaged), RAM, Swap, Disk per mount, Disk I/O, Network I/O, Load averages, Uptime |
+| **Metrics History** | SQLite snapshots of CPU/RAM/disk usage; `GET /api/metrics/history` (query: `kind`, `from`, `to`, `step` unix seconds); `/metrics-history.html` charts linked from the dashboard; rows older than **30 days** removed during periodic purge |
 | **Real-time Updates** | Server-Sent Events push data every 2 seconds — no polling, no full reloads |
 | **Cloudflare Tunnel** | Detect `cloudflared` process, tunnel name, uptime, connection/disconnection events |
 | **Security** | SSH login events from `/var/log/auth.log`, top attacker IPs, pending system/security updates |
@@ -227,12 +228,14 @@ Unsupported metrics show "N/A" in the UI — the app never crashes on missing da
 
 ```
 monitoring24/
-├── cmd/server/main.go          Entry point, embed directive, collector loop
+├── cmd/server/main.go          Entry point, collector loops, dependency wiring
 ├── internal/
 │   ├── config/config.go        CLI flag parsing
 │   ├── storage/
 │   │   ├── schema.go           Model structs + SQL schema
 │   │   └── sqlite.go           Database wrapper
+│   ├── metricshistory/
+│   │   └── metricshistory.go   Metric history query bounds + JSON aggregation
 │   ├── metrics/
 │   │   ├── system.go           CPU/RAM/disk/network via gopsutil
 │   │   ├── app.go              Self-metrics (goroutines, heap, process)
@@ -249,9 +252,12 @@ monitoring24/
 │       ├── handlers.go         REST API handlers
 │       └── routes.go           Route wiring + middleware
 ├── web/
-│   ├── index.html              Single-page app (Tailwind CSS)
+│   ├── assets.go               embed.FS (`go:embed` HTML/CSS/JS)
+│   ├── index.html              Single-page dashboard (Tailwind CSS)
+│   ├── metrics-history.html    Historical CPU/RAM/disk charts
 │   └── static/
 │       ├── app.js              Vanilla JS: state management + SSE + rendering
+│       ├── metrics-history.js  Metrics history page + chart fetch
 │       └── style.css           Custom animations and overrides
 ├── Makefile
 ├── monitoring24.service        systemd unit file
