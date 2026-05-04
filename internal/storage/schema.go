@@ -63,6 +63,17 @@ INSERT OR IGNORE INTO thresholds(key, value) VALUES
     ('disk_pct',       90.0),
     ('swap_pct',       80.0),
     ('url_latency_ms', 5000.0);
+
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+    ts         INTEGER PRIMARY KEY,
+    cpu_pct    REAL    NOT NULL,
+    ram_pct    REAL    NOT NULL,
+    swap_pct   REAL    NOT NULL,
+    ram_used   INTEGER NOT NULL,
+    ram_total  INTEGER NOT NULL,
+    disk_json  TEXT    NOT NULL,
+    net_json   TEXT    NOT NULL
+);
 `
 
 // Alert represents a fired threshold breach.
@@ -121,4 +132,32 @@ type TunnelEvent struct {
 type IPCount struct {
 	IP    string
 	Count int
+}
+
+// MetricSnapshot is one minute of aggregated system metrics stored in SQLite.
+type MetricSnapshot struct {
+	TS        int64
+	CPUPct    float64
+	RAMPct    float64
+	SwapPct   float64
+	RAMUsed   uint64
+	RAMTotal  uint64
+	Disks     []DiskSample
+	NetIfaces []NetSample
+}
+
+// DiskSample is a per-mountpoint aggregated disk metric within a MetricSnapshot.
+type DiskSample struct {
+	Mountpoint string  `json:"mountpoint"`
+	Total      uint64  `json:"total"`
+	Used       uint64  `json:"used"`
+	Percent    float64 `json:"percent"`
+	FsType     string  `json:"fs_type"`
+}
+
+// NetSample is a per-interface aggregated network metric within a MetricSnapshot.
+type NetSample struct {
+	Interface    string `json:"interface"`
+	BytesSentSec uint64 `json:"bytes_sent_sec"`
+	BytesRecvSec uint64 `json:"bytes_recv_sec"`
 }

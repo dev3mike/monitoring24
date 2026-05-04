@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -47,6 +48,7 @@ func (db *DB) Purge(ctx context.Context) error {
 		fmt.Sprintf("DELETE FROM ssh_events WHERE occurred_at < %d", now-30*86400),
 		fmt.Sprintf("DELETE FROM tunnel_events WHERE occurred_at < %d", now-30*86400),
 		fmt.Sprintf("DELETE FROM alerts WHERE resolved_at IS NOT NULL AND resolved_at < %d", now-14*86400),
+		fmt.Sprintf("DELETE FROM metric_snapshots WHERE ts < %d", now-30*86400),
 	}
 	for _, s := range stmts {
 		if _, err := db.conn.ExecContext(ctx, s); err != nil {
@@ -345,4 +347,64 @@ func (db *DB) GetThresholds() (map[string]float64, error) {
 func (db *DB) SetThreshold(key string, value float64) error {
 	_, err := db.conn.Exec(`INSERT INTO thresholds(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 	return err
+}
+
+// ── Metric Snapshots ──────────────────────────────────────────────────────────
+
+// InsertMetricSnapshot persists a 1-minute averaged metric snapshot.
+// INSERT OR REPLACE is idempotent on ts (the minute-boundary primary key).
+func (db *DB) InsertMetricSnapshot(ctx context.Context, s MetricSnapshot) error {
+	diskJSON, err := json.Marshal(s.Disks)
+	if err != nil {
+		return fmt.Errorf("marshal disk_json: %w", err)
+	}
+	netJSON, err := json.Marshal(s.NetIfaces)
+	if err != nil {
+		return fmt.Errorf("marshal net_json: %w", err)
+	}
+	_, err = db.conn.ExecContext(ctx,
+		`INSERT OR REPLACE INTO metric_snapshots
+		    (ts, cpu_pct, ram_pct, swap_pct, ram_used, ram_total, disk_json, net_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.TS, s.CPUPct, s.RAMPct, s.SwapPct, s.RAMUsed, s.RAMTotal,
+		string(diskJSON), string(netJSON),
+	)
+	return err
+}
+
+// QueryMetricHistory returns snapshots in the [from, to] range, oldest first.
+func (db *DB) QueryMetricHistory(ctx context.Context, from, to time.Time, limit int) ([]MetricSnapshot, error) {
+	rows, err := db.conn.QueryContext(ctx,
+		`SELECT ts, cpu_pct, ram_pct, swap_pct, ram_used, ram_total, disk_json, net_json
+		 FROM metric_snapshots
+		 WHERE ts >= ? AND ts <= ?
+		 ORDER BY ts ASC
+		 LIMIT ?`,
+		from.Unix(), to.Unix(), limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMetricSnapshots(rows)
+}
+
+func scanMetricSnapshots(rows *sql.Rows) ([]MetricSnapshot, error) {
+	var out []MetricSnapshot
+	for rows.Next() {
+		var s MetricSnapshot
+		var diskJSON, netJSON string
+		if err := rows.Scan(&s.TS, &s.CPUPct, &s.RAMPct, &s.SwapPct,
+			&s.RAMUsed, &s.RAMTotal, &diskJSON, &netJSON); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(diskJSON), &s.Disks); err != nil {
+			return nil, fmt.Errorf("unmarshal disk_json: %w", err)
+		}
+		if err := json.Unmarshal([]byte(netJSON), &s.NetIfaces); err != nil {
+			return nil, fmt.Errorf("unmarshal net_json: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
