@@ -109,7 +109,7 @@ func main() {
 func runCollector(
 	ctx context.Context,
 	_ *config.Config,
-	_ *storage.DB,
+	db *storage.DB,
 	broker *sse.Broker,
 	handler *httpserver.Handler,
 	sysCollector *metrics.Collector,
@@ -124,6 +124,8 @@ func runCollector(
 	defer fastTick.Stop()
 	defer slowTick.Stop()
 
+	agg := metrics.NewMinuteAggregator()
+
 	for {
 		select {
 		case <-fastTick.C:
@@ -135,6 +137,17 @@ func runCollector(
 			appSnap, _ := metrics.CollectApp(ctx, startTime)
 			netSnap, _ := metrics.CollectNetwork(ctx)
 			tunnelStatus, _ := tunnelDetector.Collect(ctx)
+
+			// Minute aggregation — flush completed bucket, then accumulate
+			if sysnap != nil {
+				now := time.Now()
+				if msSnap, ok := agg.Flush(now); ok {
+					if err := db.InsertMetricSnapshot(ctx, msSnap); err != nil {
+						log.Printf("[metrics] insert snapshot ts=%d: %v", msSnap.TS, err)
+					}
+				}
+				agg.Add(*sysnap)
+			}
 
 			// Alert evaluation
 			if sysnap != nil {
