@@ -2,7 +2,7 @@ BINARY    := monitoring24
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS   := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build run run-auth dev cross-linux cross-linux-arm64 cross-windows test vet clean install-service
+.PHONY: build run run-auth dev kill-port cross-linux cross-linux-arm64 cross-windows test vet clean install-service
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/server
@@ -24,6 +24,17 @@ dev:
 		AIR_BIN="$$(go env GOPATH)/bin/air"; \
 	fi; \
 	"$$AIR_BIN" -c .air.toml
+
+# Free the default app port (override: make kill-port PORT=8080)
+kill-port:
+	@PORT="$${PORT:-47291}"; \
+	PIDS=$$(lsof -tiTCP:"$$PORT" -sTCP:LISTEN 2>/dev/null || true); \
+	if [ -z "$$PIDS" ]; then \
+		echo "No process listening on TCP port $$PORT"; \
+		exit 0; \
+	fi; \
+	echo "Killing listener(s) on port $$PORT: $$PIDS"; \
+	kill -9 $$PIDS
 
 cross-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) \
